@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>CSV Analyzer Chat</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            background: linear-gradient(to right, #0f2027, #203a43, #2c5364);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #ffffff;
+            overflow: hidden;
+        }
+
+        #app {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        h2 {
+            text-align: center;
+            color: #00f9ff;
+            margin-top: 20px;
+        }
+
+        .upload-screen {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .chat-interface {
+            display: none;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        .chat-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .input-section {
+            display: flex;
+            gap: 10px;
+            padding: 15px;
+            background: #1e293b;
+            position: sticky;
+            bottom: 0;
+            z-index: 10;
+        }
+
+        input[type="text"],
+        button {
+            padding: 12px;
+            font-size: 16px;
+            border-radius: 8px;
+            border: none;
+            outline: none;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            background: #334155;
+            color: #ffffff;
+        }
+
+        button {
+            background: linear-gradient(to right, #00f9ff, #00c3ff);
+            color: #000;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .message {
+            max-width: 70%;
+            padding: 14px 18px;
+            border-radius: 18px;
+            line-height: 1.5;
+            font-size: 16px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .message.user {
+            align-self: flex-end;
+            background: #1e293b;
+            border-top-right-radius: 0;
+        }
+
+        .message.ai {
+            align-self: flex-start;
+            background: rgba(0, 249, 255, 0.1);
+            color: #00f9ff;
+            border-top-left-radius: 0;
+            border: 1px solid #00f9ff40;
+            box-shadow: 0 0 10px #00f9ff25;
+        }
+
+        .graph-img {
+            max-width: 300px;
+            border-radius: 10px;
+            border: 1px solid #00f9ff;
+            margin-top: 10px;
+        }
+
+        .typing-indicator {
+            color: #00f9ff;
+            font-style: italic;
+            animation: blink 1.5s infinite;
+        }
+
+        @keyframes blink {
+
+            0%,
+            100% {
+                opacity: 0.2;
+            }
+
+            50% {
+                opacity: 1;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div id="app">
+        <h2>🤖 AI CSV Assistant</h2>
+
+        <div class="upload-screen" id="uploadScreen">
+            <input type="file" id="csvFile" />
+            <button onclick="uploadCSV()">Upload & Analyze CSV</button>
+        </div>
+
+        <div class="chat-interface" id="chatInterface">
+            <div class="chat-container" id="chatBox"></div>
+            <div class="input-section">
+                <input type="text" id="questionInput" placeholder="Ask a question about your CSV..." />
+                <button onclick="askQuestion()">Ask</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let fileId = null;
+
+        function appendMessage(content, sender = 'ai', isHTML = false) {
+            const bubble = document.createElement("div");
+            bubble.className = `message ${sender}`;
+            if (isHTML) {
+                bubble.innerHTML = content;
+            } else {
+                bubble.textContent = content;
+            }
+            document.getElementById("chatBox").appendChild(bubble);
+            document.getElementById("chatBox").scrollTop = document.getElementById("chatBox").scrollHeight;
+        }
+
+        function appendTyping(textSteps) {
+            const typing = document.createElement("div");
+            typing.className = "message ai typing-indicator";
+            typing.textContent = textSteps[0];
+            document.getElementById("chatBox").appendChild(typing);
+            let step = 1;
+            const interval = setInterval(() => {
+                if (step < textSteps.length) {
+                    typing.textContent = textSteps[step++];
+                } else {
+                    clearInterval(interval);
+                }
+            }, 1000);
+            return typing;
+        }
+
+        async function uploadCSV() {
+            const fileInput = document.getElementById("csvFile");
+            if (!fileInput.files.length) {
+                alert("Please select a CSV file.");
+                return;
+            }
+
+            document.getElementById("uploadScreen").style.display = "none";
+            document.getElementById("chatInterface").style.display = "flex";
+            appendMessage("📤 Uploaded a CSV for analysis.", "user");
+
+            const typing = appendTyping([
+                "🔍 Analyzing CSV...",
+                "📈 Creating graphs...",
+                "🧠 Preparing summary..."
+            ]);
+
+            const formData = new FormData();
+            formData.append("file", fileInput.files[0]);
+
+            const response = await fetch("http://localhost:8000/upload_csv/", {
+                method: "POST",
+                body: formData,
+            });
+
+            const data = await response.json();
+            fileId = data.file_id;
+            typing.remove();
+
+            const explanationHTML = marked.parse(data.chatgpt_explanation);
+            appendMessage(explanationHTML, "ai", true);
+
+            if (data.graph_paths) {
+                data.graph_paths.forEach(path => {
+                    const imgTag = `<img class="graph-img" src="http://localhost:8000${path}" />`;
+                    appendMessage(imgTag, "ai", true);
+                });
+            }
+        }
+
+        async function askQuestion() {
+            const question = document.getElementById("questionInput").value;
+            if (!question || !fileId) {
+                alert("Please enter a question and ensure CSV is uploaded.");
+                return;
+            }
+
+            appendMessage(`❓ ${question}`, "user");
+
+            const typing = appendTyping([
+                "🤔 Thinking...",
+                "🔎 Analyzing...",
+                "💡 Generating answer..."
+            ]);
+
+            const response = await fetch(`http://localhost:8000/ask/${fileId}`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ question })
+            });
+
+            const data = await response.json();
+            typing.remove();
+
+            appendMessage(marked.parse(data.answer), "ai", true);
+        }
+    </script>
+</body>
+
+</html>
